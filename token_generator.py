@@ -1,46 +1,38 @@
 import os
+import requests
 from kiteconnect import KiteConnect
 from dotenv import load_dotenv
 
 load_dotenv()
 
+# Kite details
 api_key = os.getenv("KITE_API_KEY")
 api_secret = os.getenv("KITE_API_SECRET")
 request_token = os.getenv("REQUEST_TOKEN")
 
+# Render details
+render_api_key = os.getenv("RENDER_API_KEY")
+render_service_id = os.getenv("RENDER_SERVICE_ID")
+render_api_url = f"https://api.render.com/v1/services/{render_service_id}/envVars"
+
 kite = KiteConnect(api_key=api_key)
+session = kite.generate_session(request_token, api_secret=api_secret)
+access_token = session["access_token"]
 
-try:
-    print("🔑 Step 1: Attempting to generate session...")
-    session = kite.generate_session(request_token, api_secret=api_secret)
-    print(f"✅ Step 2: Session response: {session}")
+# Update Render environment
+headers = {
+    "Authorization": f"Bearer {render_api_key}",
+    "Content-Type": "application/json"
+}
 
-    access_token = session.get("access_token")
-    if not access_token:
-        print("❌ ERROR: Access token missing from session response.")
-        exit(1)
-    else:
-        print(f"✅ Access token generated: {access_token}")
+payload = [{
+    "key": "KITE_ACCESS_TOKEN",
+    "value": access_token
+}]
 
-    if os.path.exists(".env"):
-        updated = False
-        with open(".env", "r") as file:
-            lines = file.readlines()
+response = requests.patch(render_api_url, headers=headers, json=payload)
 
-        with open(".env", "w") as file:
-            for line in lines:
-                if line.startswith("KITE_ACCESS_TOKEN"):
-                    file.write(f"KITE_ACCESS_TOKEN={access_token}\n")
-                    updated = True
-                else:
-                    file.write(line)
-            if not updated:
-                file.write(f"KITE_ACCESS_TOKEN={access_token}\n")
-
-        print("✅ Access token successfully written into .env file.")
-    else:
-        print("❌ ERROR: .env file not found; cannot write access token.")
-
-except Exception as e:
-    print("❌ ERROR: Exception occurred during access token generation.")
-    print(f"Details: {e}")
+if response.ok:
+    print("✅ Access token updated successfully in Render environment")
+else:
+    print(f"❌ Failed to update Render environment: {response.status_code} {response.text}")
