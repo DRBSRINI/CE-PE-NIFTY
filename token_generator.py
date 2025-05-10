@@ -13,6 +13,6 @@ kite = KiteConnect(api_key=api_key)
 try:
     session = kite.generate_session(request_token, api_secret=api_secret)
     access_token = session["access_token"]
-    print(f"✅ Access token generated: {access_token}")
+    print(f"✅ ACCESS TOKEN GENERATED: {access_token}")
 except Exception as e:
-    print(f"❌ Failed to generate access token: {e}")
+    print(f"❌ FAILED to generate access token: {e}")
