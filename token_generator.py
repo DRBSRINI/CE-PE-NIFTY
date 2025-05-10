@@ -11,19 +11,19 @@ request_token = os.getenv("REQUEST_TOKEN")
 kite = KiteConnect(api_key=api_key)
 
 try:
-    print("🔑 Generating session with request token...")
+    print("🔑 Step 1: Attempting to generate session...")
     session = kite.generate_session(request_token, api_secret=api_secret)
-    print(f"✅ Full session response: {session}")
+    print(f"✅ Step 2: Session response: {session}")
 
     access_token = session.get("access_token")
     if not access_token:
-        print("❌ Access token missing in response. Exiting.")
+        print("❌ ERROR: Access token missing from session response.")
         exit(1)
+    else:
+        print(f"✅ Access token generated: {access_token}")
 
-    print(f"✅ Access token generated: {access_token}")
-
-    updated = False
     if os.path.exists(".env"):
+        updated = False
         with open(".env", "r") as file:
             lines = file.readlines()
 
@@ -37,10 +37,10 @@ try:
             if not updated:
                 file.write(f"KITE_ACCESS_TOKEN={access_token}\n")
 
-        print("✅ Access token updated in .env")
+        print("✅ Access token successfully written into .env file.")
     else:
-        print("❌ .env file not found. Cannot update access token.")
+        print("❌ ERROR: .env file not found; cannot write access token.")
 
 except Exception as e:
-    print("❌ Failed to generate access token.")
-    print(f"Error details: {e}")
+    print("❌ ERROR: Exception occurred during access token generation.")
+    print(f"Details: {e}")
