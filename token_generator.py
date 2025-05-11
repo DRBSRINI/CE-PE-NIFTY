@@ -1,30 +1,49 @@
 import os
+import requests
 from kiteconnect import KiteConnect
 from dotenv import load_dotenv
 
+# Load environment variables
 load_dotenv()
 
+# Step 1: Kite API credentials
 api_key = os.getenv("KITE_API_KEY")
 api_secret = os.getenv("KITE_API_SECRET")
 request_token = os.getenv("REQUEST_TOKEN")
 
+# Step 2: Generate session and access token
 kite = KiteConnect(api_key=api_key)
-try:
-    session = kite.generate_session(request_token, api_secret=api_secret)
-    access_token = session["access_token"]
-    print("✅ Access token generated:", access_token)
+session = kite.generate_session(request_token, api_secret=api_secret)
+access_token = session["access_token"]
+print("✅ Access token generated:", access_token)
 
-    # Update .env file (Option 1)
-    with open(".env", "r") as f:
-        lines = f.readlines()
+# Step 3: Update RENDER environment variable using API
+render_api_key = os.getenv("RENDER_API_KEY")
+render_service_id = os.getenv("RENDER_SERVICE_ID")
 
-    with open(".env", "w") as f:
-        for line in lines:
-            if line.startswith("KITE_ACCESS_TOKEN="):
-                f.write(f"KITE_ACCESS_TOKEN={access_token}\n")
-            else:
-                f.write(line)
-    print("✅ Access token updated in .env")
+if not render_api_key or not render_service_id:
+    print("❌ Missing RENDER_API_KEY or RENDER_SERVICE_ID")
+    exit()
 
-except Exception as e:
-    print("❌ Failed to generate access token:", e)
+url = f"https://api.render.com/v1/services/{render_service_id}/env-vars"
+headers = {
+    "Accept": "application/json",
+    "Authorization": f"Bearer {render_api_key}",
+    "Content-Type": "application/json"
+}
+payload = {
+    "envVars": [
+        {
+            "key": "KITE_ACCESS_TOKEN",
+            "value": access_token
+        }
+    ]
+}
+
+response = requests.put(url, headers=headers, json=payload)
+
+if response.status_code == 200:
+    print("✅ Access token updated in Render environment.")
+else:
+    print("❌ Failed to update access token. Status code:", response.status_code)
+    print(response.text)
