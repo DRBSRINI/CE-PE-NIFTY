@@ -6,14 +6,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Load credentials
+# Fetch credentials
 api_key = os.getenv("KITE_API_KEY")
 api_secret = os.getenv("KITE_API_SECRET")
 request_token = os.getenv("REQUEST_TOKEN")
 render_api_key = os.getenv("RENDER_API_KEY")
 render_service_id = os.getenv("RENDER_SERVICE_ID")
 
-# Generate session and access token
+# Step 1: Generate access token from request token
 kite = KiteConnect(api_key=api_key)
 try:
     session = kite.generate_session(request_token, api_secret=api_secret)
@@ -23,13 +23,13 @@ except Exception as e:
     print("❌ Failed to generate access token:", str(e))
     exit(1)
 
-# Update CE-PE-NIFTY environment variable via Render API
+# Step 2: Update access token in Render environment
 url = f"https://api.render.com/v1/services/{render_service_id}/env-vars"
 
 headers = {
+    "Authorization": f"Bearer {render_api_key}",
     "Accept": "application/json",
-    "Content-Type": "application/json",
-    "Authorization": f"Bearer {render_api_key}"
+    "Content-Type": "application/json"
 }
 
 payload = {
@@ -42,11 +42,11 @@ payload = {
 }
 
 try:
-    response = requests.patch(url, headers=headers, data=json.dumps(payload))
-    if response.status_code in [200, 201]:
-        print("✅ Access token updated in CE-PE-NIFTY environment.")
+    response = requests.patch(url, headers=headers, json=payload)
+    if response.status_code == 200:
+        print("✅ Access token updated successfully in Render service.")
     else:
         print(f"❌ Failed to update access token. Status code: {response.status_code}")
         print("Response:", response.text)
 except Exception as e:
-    print("❌ Exception during environment update:", str(e))
+    print("❌ Error updating token to Render:", str(e))
