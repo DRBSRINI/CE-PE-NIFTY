@@ -1,3 +1,5 @@
-kiteconnect==4.1.0
+kiteconnect
 python-dotenv
+requests
+pytz
 apscheduler
