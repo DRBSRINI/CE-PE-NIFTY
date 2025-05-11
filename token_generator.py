@@ -1,68 +1,90 @@
-from flask import Flask, request, jsonify
-import requests
+# token_generator.py (Render Cron Job Script)
+
 import os
-from datetime import datetime
+import sys
+import pyotp
+import requests
+from urllib.parse import urlparse, parse_qs
+from kiteconnect import KiteConnect
 
-app = Flask(__name__)
+# --- Load credentials from Render environment ---
+username = os.environ.get("KITE_USER_ID")
+password = os.environ.get("KITE_PASSWORD")
+totp_key = os.environ.get("KITE_TOTP")
+api_key = os.environ.get("KITE_API_KEY")
+api_secret = os.environ.get("KITE_API_SECRET")
+render_service_id = os.environ.get("RENDER_SERVICE_ID")
+render_api_key = os.environ.get("RENDER_API_KEY")
 
-# Zerodha API credentials - Store these in Render's environment variables
-API_KEY = os.getenv('ZERODHA_API_KEY')
-API_SECRET = os.getenv('ZERODHA_API_SECRET')
-REDIRECT_URL = os.getenv('ZERODHA_REDIRECT_URL')  # Should match the one in Kite developer console
+kite = KiteConnect(api_key=api_key)
 
-@app.route('/generate_access_token', methods=['GET'])
+
 def generate_access_token():
-    """
-    Generate access token from request token
-    Example request: /generate_access_token?request_token=xxxxxxxxxx
-    """
-    request_token = request.args.get('request_token')
-    
-    if not request_token:
-        return jsonify({'error': 'Request token is required'}), 400
-    
     try:
-        # Step 1: Get session data from Zerodha
-        session_url = "https://api.kite.trade/session/token"
-        data = {
-            "api_key": API_KEY,
-            "request_token": request_token,
-            "checksum": hashlib.sha256(f"{API_KEY}{request_token}{API_SECRET}".encode()).hexdigest()
-        }
-        
-        response = requests.post(session_url, data=data)
-        response.raise_for_status()
-        
-        session_data = response.json()
-        
-        # Step 2: Extract access token
-        access_token = session_data['data']['access_token']
-        
-        # Store the token securely (in a real app, you'd use a database)
-        token_data = {
-            'access_token': access_token,
-            'timestamp': datetime.now().isoformat()
-        }
-        
-        return jsonify({
-            'status': 'success',
-            'data': token_data
+        session = requests.Session()
+
+        # Step 1: Kite login
+        login_resp = session.post("https://kite.zerodha.com/api/login", data={
+            "user_id": username,
+            "password": password
+        }).json()
+        request_id = login_resp["data"]["request_id"]
+
+        # Step 2: Submit TOTP
+        otp = pyotp.TOTP(totp_key).now()
+        session.post("https://kite.zerodha.com/api/twofa", data={
+            "user_id": username,
+            "request_id": request_id,
+            "twofa_value": otp
         })
-        
-    except requests.exceptions.RequestException as e:
-        return jsonify({
-            'status': 'error',
-            'message': f"Failed to generate access token: {str(e)}"
-        }), 500
-    except KeyError:
-        return jsonify({
-            'status': 'error',
-            'message': 'Invalid response from Zerodha API'
-        }), 500
 
-@app.route('/')
-def health_check():
-    return jsonify({'status': 'running', 'service': 'zerodha_token_generator'})
+        # Step 3: Fetch request token from redirect URL
+        auth_resp = session.get(f"https://kite.trade/connect/login?api_key={api_key}")
+        parsed = urlparse(auth_resp.url)
+        request_token = parse_qs(parsed.query)["request_token"][0]
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=os.getenv('PORT', 5000))
+        # Step 4: Generate access token
+        session_data = kite.generate_session(request_token, api_secret=api_secret)
+        access_token = session_data["access_token"]
+        print("✅ Access Token Generated:", access_token)
+
+        update_render_env(access_token)
+
+    except Exception as e:
+        print("❌ Failed to generate access token:", str(e))
+        sys.exit(1)
+
+
+def update_render_env(access_token):
+    try:
+        url = f"https://api.render.com/v1/services/{render_service_id}/env-vars"
+        headers = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {render_api_key}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "envVars": [
+                {
+                    "key": "KITE_ACCESS_TOKEN",
+                    "value": access_token
+                }
+            ]
+        }
+
+        response = requests.patch(url, json=payload, headers=headers)
+
+        if response.status_code == 200:
+            print("✅ Access token updated in Render env.")
+        else:
+            print("❌ Failed to update token. Status:", response.status_code)
+            print("Response:", response.text)
+
+    except Exception as e:
+        print("❌ Error updating token in Render:", str(e))
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    generate_access_token()
