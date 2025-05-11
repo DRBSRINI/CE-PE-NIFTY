@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Load env variables
+# Load env vars
 api_key = os.getenv("KITE_API_KEY")
 api_secret = os.getenv("KITE_API_SECRET")
 request_token = os.getenv("REQUEST_TOKEN")
@@ -23,28 +23,28 @@ except Exception as e:
     print("❌ Token generation failed:", str(e))
     exit(1)
 
-# Update environment variable via PATCH
+# Correct PUT request to Render API
 url = f"https://api.render.com/v1/services/{render_service_id}/env-vars"
 headers = {
     "Authorization": f"Bearer {render_api_key}",
-    "Content-Type": "application/json",
-    "Accept": "application/json"
+    "Content-Type": "application/json"
 }
 payload = {
     "envVars": [
         {
             "key": "KITE_ACCESS_TOKEN",
-            "value": access_token
+            "value": access_token,
+            "alias": None
         }
     ]
 }
 
 try:
-    response = requests.patch(url, headers=headers, data=json.dumps(payload))
+    response = requests.put(url, headers=headers, data=json.dumps(payload))
     if response.status_code == 200:
-        print("✅ KITE_ACCESS_TOKEN successfully updated on CE-PE-NIFTY Render env.")
+        print("✅ Access token updated in CE-PE-NIFTY env.")
     else:
         print(f"❌ Failed to update token. Status: {response.status_code}")
         print("Response:", response.text)
 except Exception as e:
-    print("❌ Exception during PATCH:", str(e))
+    print("❌ Exception during update:", str(e))
