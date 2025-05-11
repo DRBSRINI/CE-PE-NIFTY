@@ -3,3 +3,5 @@ python-dotenv
 requests
 pytz
 apscheduler
+kiteconnect
+pyotp
