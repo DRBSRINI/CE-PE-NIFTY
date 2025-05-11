@@ -1,50 +1,68 @@
-import os
-import json
+from flask import Flask, request, jsonify
 import requests
-from kiteconnect import KiteConnect
-from dotenv import load_dotenv
+import os
+from datetime import datetime
 
-load_dotenv()
+app = Flask(__name__)
 
-# Load env vars
-api_key = os.getenv("KITE_API_KEY")
-api_secret = os.getenv("KITE_API_SECRET")
-request_token = os.getenv("REQUEST_TOKEN")
-render_api_key = os.getenv("RENDER_API_KEY")
-render_service_id = os.getenv("RENDER_SERVICE_ID")
+# Zerodha API credentials - Store these in Render's environment variables
+API_KEY = os.getenv('ZERODHA_API_KEY')
+API_SECRET = os.getenv('ZERODHA_API_SECRET')
+REDIRECT_URL = os.getenv('ZERODHA_REDIRECT_URL')  # Should match the one in Kite developer console
 
-# Generate access token
-kite = KiteConnect(api_key=api_key)
-try:
-    session = kite.generate_session(request_token, api_secret=api_secret)
-    access_token = session["access_token"]
-    print("✅ Access token generated:", access_token)
-except Exception as e:
-    print("❌ Token generation failed:", str(e))
-    exit(1)
-
-# Correct PUT request to Render API
-url = f"https://api.render.com/v1/services/{render_service_id}/env-vars"
-headers = {
-    "Authorization": f"Bearer {render_api_key}",
-    "Content-Type": "application/json"
-}
-payload = {
-    "envVars": [
-        {
-            "key": "KITE_ACCESS_TOKEN",
-            "value": access_token,
-            "alias": None
+@app.route('/generate_access_token', methods=['GET'])
+def generate_access_token():
+    """
+    Generate access token from request token
+    Example request: /generate_access_token?request_token=xxxxxxxxxx
+    """
+    request_token = request.args.get('request_token')
+    
+    if not request_token:
+        return jsonify({'error': 'Request token is required'}), 400
+    
+    try:
+        # Step 1: Get session data from Zerodha
+        session_url = "https://api.kite.trade/session/token"
+        data = {
+            "api_key": API_KEY,
+            "request_token": request_token,
+            "checksum": hashlib.sha256(f"{API_KEY}{request_token}{API_SECRET}".encode()).hexdigest()
         }
-    ]
-}
+        
+        response = requests.post(session_url, data=data)
+        response.raise_for_status()
+        
+        session_data = response.json()
+        
+        # Step 2: Extract access token
+        access_token = session_data['data']['access_token']
+        
+        # Store the token securely (in a real app, you'd use a database)
+        token_data = {
+            'access_token': access_token,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        return jsonify({
+            'status': 'success',
+            'data': token_data
+        })
+        
+    except requests.exceptions.RequestException as e:
+        return jsonify({
+            'status': 'error',
+            'message': f"Failed to generate access token: {str(e)}"
+        }), 500
+    except KeyError:
+        return jsonify({
+            'status': 'error',
+            'message': 'Invalid response from Zerodha API'
+        }), 500
 
-try:
-    response = requests.put(url, headers=headers, data=json.dumps(payload))
-    if response.status_code == 200:
-        print("✅ Access token updated in CE-PE-NIFTY env.")
-    else:
-        print(f"❌ Failed to update token. Status: {response.status_code}")
-        print("Response:", response.text)
-except Exception as e:
-    print("❌ Exception during update:", str(e))
+@app.route('/')
+def health_check():
+    return jsonify({'status': 'running', 'service': 'zerodha_token_generator'})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=os.getenv('PORT', 5000))
