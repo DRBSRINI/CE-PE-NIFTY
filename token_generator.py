@@ -1,62 +1,56 @@
 import os
-import requests
 import pyotp
+import requests
 from kiteconnect import KiteConnect
-from urllib.parse import urlparse, parse_qs
 
-# 1. Load from Render ENV
-api_key = os.getenv("KITE_API_KEY")
-api_secret = os.getenv("KITE_API_SECRET")
-user_id = os.getenv("KITE_USER_ID")
-password = os.getenv("KITE_PASSWORD")
-totp_key = os.getenv("KITE_TOTP")
+# Load environment variables
+kite_user = os.environ.get("KITE_USER_ID")
+kite_pwd = os.environ.get("KITE_PASSWORD")
+kite_totp = os.environ.get("KITE_TOTP")
+kite_api_key = os.environ.get("KITE_API_KEY")
+kite_api_secret = os.environ.get("KITE_API_SECRET")
 
-render_service_id = os.getenv("RENDER_SERVICE_ID")  # CE-PE-NIFTY
-render_api_key = os.getenv("RENDER_API_KEY")        # Your Render API Key
+kite = KiteConnect(api_key=kite_api_key)
 
-# 2. Create session
-session = requests.Session()
-totp = pyotp.TOTP(totp_key)
-totp_code = totp.now()
+def generate_access_token():
+    try:
+        print("🔐 Initiating login session...")
+        session = requests.Session()
 
-# 3. Step-by-step login
-try:
-    res = session.post("https://kite.zerodha.com/api/login", data={"user_id": user_id, "password": password})
-    request_id = res.json().get("data", {}).get("request_id")
-    if not request_id:
-        raise Exception("Login failed. Check password or ID.")
+        # Step 1: Login and fetch request_id
+        resp = session.post("https://kite.zerodha.com/api/login", {
+            "user_id": kite_user,
+            "password": kite_pwd
+        })
+        request_id = resp.json()["data"]["request_id"]
 
-    session.post("https://kite.zerodha.com/api/twofa", data={"user_id": user_id, "request_id": request_id, "twofa_value": totp_code})
-    redirect_res = session.get(f"https://kite.trade/connect/login?api_key={api_key}")
-    parsed = urlparse(redirect_res.url)
-    request_token = parse_qs(parsed.query).get("request_token", [None])[0]
-    if not request_token:
-        raise Exception("Request token missing in redirect URL.")
+        # Step 2: 2FA verification using TOTP
+        session.post("https://kite.zerodha.com/api/twofa", {
+            "user_id": kite_user,
+            "request_id": request_id,
+            "twofa_value": pyotp.TOTP(kite_totp).now()
+        })
 
-    # 4. Get access token
-    kite = KiteConnect(api_key=api_key)
-    data = kite.generate_session(request_token=request_token, api_secret=api_secret)
-    access_token = data["access_token"]
-    print("✅ Access Token:", access_token)
+        # Step 3: Redirect to request_token
+        login_url = f"https://kite.trade/connect/login?api_key={kite_api_key}"
+        response = session.get(login_url, allow_redirects=False)
+        location = response.headers.get("Location")
+        request_token = location.split("request_token=")[1].split("&")[0]
 
-        # 5. PATCH Render env var
-    headers = {
-        "Accept": "application/json",
-        "Authorization": f"Bearer {render_api_key}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "envVars": [
-            {
-                "key": "KITE_ACCESS_TOKEN",
-                "value": access_token
-            }
-        ]
-    }
-    patch_url = f"https://api.render.com/v1/services/{render_service_id}/env-vars"
-    response = requests.patch(patch_url, headers=headers, json=payload)
+        # Step 4: Exchange for access_token
+        data = kite.generate_session(request_token, api_secret=kite_api_secret)
+        access_token = data["access_token"]
 
-    if response.status_code == 200:
-        print("✅ Access token updated in Render service.")
-    else:
-        print(f"❌ Failed to update token. Status {response.status_code}. Message: {response.text}")
+        # Save to file instead of .env
+        with open("access_token.txt", "w") as f:
+            f.write(access_token)
+
+        print("✅ Access token generated and saved.")
+        return access_token
+
+    except Exception as e:
+        print(f"❌ Failed: {e}")
+        return None
+
+if __name__ == "__main__":
+    generate_access_token()
