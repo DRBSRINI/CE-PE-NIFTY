@@ -1,56 +1,67 @@
 import os
+import json
+import logging
 import pyotp
-import requests
 from kiteconnect import KiteConnect
+from dotenv import load_dotenv
 
-# Load environment variables
-kite_user = os.environ.get("KITE_USER_ID")
-kite_pwd = os.environ.get("KITE_PASSWORD")
-kite_totp = os.environ.get("KITE_TOTP")
-kite_api_key = os.environ.get("KITE_API_KEY")
-kite_api_secret = os.environ.get("KITE_API_SECRET")
+load_dotenv()
 
-kite = KiteConnect(api_key=kite_api_key)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-def generate_access_token():
-    try:
-        print("🔐 Initiating login session...")
-        session = requests.Session()
+API_KEY = os.getenv("KITE_API_KEY")
+API_SECRET = os.getenv("KITE_API_SECRET")
+KITE_USER_ID = os.getenv("KITE_USER_ID")
+KITE_PASSWORD = os.getenv("KITE_PASSWORD")
+KITE_TOTP = os.getenv("KITE_TOTP")
+RENDER_API_KEY = os.getenv("RENDER_API_KEY")
+RENDER_SERVICE_ID = os.getenv("RENDER_SERVICE_ID")
 
-        # Step 1: Login and fetch request_id
-        resp = session.post("https://kite.zerodha.com/api/login", {
-            "user_id": kite_user,
-            "password": kite_pwd
-        })
-        request_id = resp.json()["data"]["request_id"]
+if not all([API_KEY, API_SECRET, KITE_USER_ID, KITE_PASSWORD, KITE_TOTP, RENDER_API_KEY, RENDER_SERVICE_ID]):
+    raise EnvironmentError("Missing required environment variables")
 
-        # Step 2: 2FA verification using TOTP
-        session.post("https://kite.zerodha.com/api/twofa", {
-            "user_id": kite_user,
-            "request_id": request_id,
-            "twofa_value": pyotp.TOTP(kite_totp).now()
-        })
+kite = KiteConnect(api_key=API_KEY)
 
-        # Step 3: Redirect to request_token
-        login_url = f"https://kite.trade/connect/login?api_key={kite_api_key}"
-        response = session.get(login_url, allow_redirects=False)
-        location = response.headers.get("Location")
-        request_token = location.split("request_token=")[1].split("&")[0]
+# Generate TOTP
+totp = pyotp.TOTP(KITE_TOTP).now()
 
-        # Step 4: Exchange for access_token
-        data = kite.generate_session(request_token, api_secret=kite_api_secret)
-        access_token = data["access_token"]
+try:
+    request_token = kite.generate_session(
+        request_token=None,  # None for TOTP login
+        api_secret=API_SECRET,
+    )
+except Exception as e:
+    logger.error(f"Login failed: {str(e)}")
+    raise
 
-        # Save to file instead of .env
-        with open("access_token.txt", "w") as f:
-            f.write(access_token)
+access_token = kite.access_token
+logger.info(f"Access Token: {access_token}")
 
-        print("✅ Access token generated and saved.")
-        return access_token
+# Update Render env variable
+import requests
 
-    except Exception as e:
-        print(f"❌ Failed: {e}")
-        return None
+url = f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars"
+headers = {
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "Authorization": f"Bearer {RENDER_API_KEY}"
+}
 
-if __name__ == "__main__":
-    generate_access_token()
+payload = {
+    "envVars": [
+        {
+            "key": "ACCESS_TOKEN",
+            "value": access_token
+        }
+    ]
+}
+
+try:
+    response = requests.patch(url, headers=headers, data=json.dumps(payload))
+    if response.status_code == 200:
+        logger.info("ACCESS_TOKEN updated successfully on Render.")
+    else:
+        logger.error(f"Failed to update token. Status {response.status_code}. Message: {response.text}")
+except Exception as e:
+    logger.error(f"Exception while updating ACCESS_TOKEN: {str(e)}")
