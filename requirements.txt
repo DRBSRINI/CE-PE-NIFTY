@@ -1,5 +1,3 @@
-kiteconnect
+kiteconnect==4.1.0
 python-dotenv
 apscheduler
-pytz
-python-telegram-bot
