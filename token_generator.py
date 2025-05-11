@@ -39,22 +39,24 @@ try:
     access_token = data["access_token"]
     print("✅ Access Token:", access_token)
 
-    # 5. PATCH Render env var
-    render_api_url = f"https://api.render.com/v1/services/{render_service_id}/env-vars"
+        # 5. PATCH Render env var
     headers = {
+        "Accept": "application/json",
         "Authorization": f"Bearer {render_api_key}",
-        "Content-Type": "application/json",
-        "Accept": "application/json"
+        "Content-Type": "application/json"
     }
     payload = {
-        "envVars": [{"key": "KITE_ACCESS_TOKEN", "value": access_token}]
+        "envVars": [
+            {
+                "key": "KITE_ACCESS_TOKEN",
+                "value": access_token
+            }
+        ]
     }
-    response = requests.patch(render_api_url, json=payload, headers=headers)
+    patch_url = f"https://api.render.com/v1/services/{render_service_id}/env-vars"
+    response = requests.patch(patch_url, headers=headers, json=payload)
 
     if response.status_code == 200:
-        print("✅ Access token updated successfully in Render.")
+        print("✅ Access token updated in Render service.")
     else:
         print(f"❌ Failed to update token. Status {response.status_code}. Message: {response.text}")
-
-except Exception as e:
-    print("❌ Error:", str(e))
