@@ -32,13 +32,11 @@ headers = {
     "Content-Type": "application/json"
 }
 payload = {
-    "envVars": [
-        {
-            "key": "KITE_ACCESS_TOKEN",
-            "value": access_token
-        }
-    ]
+    "values": {
+        "KITE_ACCESS_TOKEN": access_token
+    }
 }
+
 
 response = requests.put(url, headers=headers, json=payload)
 
