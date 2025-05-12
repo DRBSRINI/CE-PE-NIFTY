@@ -1,69 +1,60 @@
 import os
-import json
-import logging
-import pyotp
 import requests
+import pyotp
 from kiteconnect import KiteConnect
-from dotenv import load_dotenv
+from urllib.parse import urlparse, parse_qs
 
-load_dotenv()
+# 1. Load from Render ENV
+api_key = os.getenv("KITE_API_KEY")
+api_secret = os.getenv("KITE_API_SECRET")
+user_id = os.getenv("KITE_USER_ID")
+password = os.getenv("KITE_PASSWORD")
+totp_key = os.getenv("KITE_TOTP")
 
-# Logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+render_service_id = os.getenv("RENDER_SERVICE_ID")  # CE-PE-NIFTY
+render_api_key = os.getenv("RENDER_API_KEY")        # Your Render API Key
 
-# Env Vars
-API_KEY = os.getenv("KITE_API_KEY")
-API_SECRET = os.getenv("KITE_API_SECRET")
-USER_ID = os.getenv("KITE_USER_ID")
-PASSWORD = os.getenv("KITE_PASSWORD")
-TOTP_SECRET = os.getenv("KITE_TOTP")
-RENDER_API_KEY = os.getenv("RENDER_API_KEY")
-RENDER_SERVICE_ID = os.getenv("RENDER_SERVICE_ID")
+# 2. Create session
+session = requests.Session()
+totp = pyotp.TOTP(totp_key)
+totp_code = totp.now()
 
-if not all([API_KEY, API_SECRET, USER_ID, PASSWORD, TOTP_SECRET, RENDER_API_KEY, RENDER_SERVICE_ID]):
-    raise EnvironmentError("Missing one or more required environment variables.")
-
-# Init KiteConnect
-kite = KiteConnect(api_key=API_KEY)
-
-# Generate TOTP
-totp = pyotp.TOTP(TOTP_SECRET).now()
-
+# 3. Step-by-step login
 try:
-    # Correct method for TOTP login
-    session_data = kite.login_with_credentials(
-        user_id=USER_ID,
-        password=PASSWORD,
-        twofa=totp
-    )
-    access_token = session_data["access_token"]
-    logger.info(f"Access Token: {access_token}")
-except Exception as e:
-    logger.error(f"Login failed: {str(e)}")
-    raise
+    res = session.post("https://kite.zerodha.com/api/login", data={"user_id": user_id, "password": password})
+    request_id = res.json().get("data", {}).get("request_id")
+    if not request_id:
+        raise Exception("Login failed. Check password or ID.")
 
-# Push token to Render env
-url = f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars"
-headers = {
-    "Accept": "application/json",
-    "Content-Type": "application/json",
-    "Authorization": f"Bearer {RENDER_API_KEY}"
-}
-payload = {
-    "envVars": [
-        {
-            "key": "ACCESS_TOKEN",
-            "value": access_token
-        }
-    ]
-}
+    session.post("https://kite.zerodha.com/api/twofa", data={"user_id": user_id, "request_id": request_id, "twofa_value": totp_code})
+    redirect_res = session.get(f"https://kite.trade/connect/login?api_key={api_key}")
+    parsed = urlparse(redirect_res.url)
+    request_token = parse_qs(parsed.query).get("request_token", [None])[0]
+    if not request_token:
+        raise Exception("Request token missing in redirect URL.")
 
-try:
-    response = requests.patch(url, headers=headers, data=json.dumps(payload))
+    # 4. Get access token
+    kite = KiteConnect(api_key=api_key)
+    data = kite.generate_session(request_token=request_token, api_secret=api_secret)
+    access_token = data["access_token"]
+    print("✅ Access Token:", access_token)
+
+    # 5. PATCH Render env var
+    render_api_url = f"https://api.render.com/v1/services/{render_service_id}/env-vars"
+    headers = {
+        "Authorization": f"Bearer {render_api_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
+    payload = {
+        "envVars": [{"key": "KITE_ACCESS_TOKEN", "value": access_token}]
+    }
+    response = requests.patch(render_api_url, json=payload, headers=headers)
+
     if response.status_code == 200:
-        logger.info("ACCESS_TOKEN updated successfully on Render.")
+        print("✅ Access token updated successfully in Render.")
     else:
-        logger.error(f"Failed to update token. Status {response.status_code}. Message: {response.text}")
+        print(f"❌ Failed to update token. Status {response.status_code}. Message: {response.text}")
+
 except Exception as e:
-    logger.error(f"Exception during token update: {str(e)}")
+    print("❌ Error:", str(e))
